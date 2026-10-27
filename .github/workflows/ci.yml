@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: Checagem (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Mac e Windows: o time usa os dois; Linux: onde a imagem de producao e gerada
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
+  docker:
+    name: Imagem Docker
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t controle-equipe-qa:ci .
+      - name: Sobe o container e confere o healthcheck e a pagina
+        run: |
+          docker run -d --name app -p 8080:8080 controle-equipe-qa:ci
+          for i in $(seq 1 20); do curl -fs http://localhost:8080/healthz && break; sleep 1; done
+          curl -fs http://localhost:8080/ | grep -q '<div id="root">'
+          docker rm -f app

@@ -7,6 +7,8 @@ Excel (`.xlsx`) e Word (`.docx`).
 Feito com Vite + React + TypeScript + TailwindCSS. Roda igual no **Mac** e no
 **Windows**.
 
+> **Hospedar o app (time de infra):** veja [`docs/HOSPEDAGEM.md`](docs/HOSPEDAGEM.md).
+
 ---
 
 ## 1. Requisitos (uma vez por máquina)
@@ -102,10 +104,10 @@ Fez mudanças no código e quer enviar para o repositório:
    git status
    ```
 
-2. Confira que o app ainda compila:
+2. Confira que está tudo certo (tipos, lint e build):
 
    ```bash
-   npm run build
+   npm run check
    ```
 
 3. Adicione, registre e envie:
@@ -134,8 +136,8 @@ npm run build     # gera a pasta dist/
 npm run preview   # serve o dist/ para conferir no navegador
 ```
 
-A pasta `dist/` é um site estático (HTML, CSS e JS): pode ser hospedada em
-qualquer servidor de arquivos estáticos.
+A pasta `dist/` é um site estático (HTML, CSS e JS). Como hospedar (Docker ou
+servidor web): [`docs/HOSPEDAGEM.md`](docs/HOSPEDAGEM.md).
 
 ## Comandos
 
@@ -143,8 +145,11 @@ qualquer servidor de arquivos estáticos.
 |-------------------|----------------------------------------------|
 | `npm install`     | baixa as dependências (depois de clonar ou de `git pull`) |
 | `npm run dev`     | sobe o app em modo desenvolvimento           |
-| `npm run build`   | gera a versão final em `dist/`               |
+| `npm run build`   | confere os tipos e gera a versão final em `dist/` |
 | `npm run preview` | serve o `dist/` para conferir o build        |
+| `npm run typecheck` | confere os tipos do TypeScript             |
+| `npm run lint`    | confere o código com o ESLint                |
+| `npm run check`   | tudo acima de uma vez (o mesmo que o CI roda) |
 
 ## Problemas comuns
 
@@ -156,9 +161,34 @@ qualquer servidor de arquivos estáticos.
 | No Windows, o PowerShell bloqueia o `npm` ("execução de scripts desabilitada") | Rode uma vez: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. |
 | Os dados sumiram | Foram salvos em outro navegador/máquina ou o navegador foi limpo. Veja *Onde ficam os dados*. |
 
+## Estrutura do projeto
+
+```
+├── src/
+│   ├── main.tsx                 entrada do React
+│   ├── App.tsx
+│   ├── types.ts                 Membro, Projeto e as situações possíveis
+│   ├── components/
+│   │   ├── ControleEquipeQA.tsx tela principal (lista, busca, exportação)
+│   │   ├── CardMembro.tsx       card de um QA
+│   │   └── CardProjeto.tsx      formulário de um projeto
+│   ├── lib/
+│   │   ├── storage.ts           onde os dados ficam (localStorage ou window.storage)
+│   │   ├── dados.ts             carregar/salvar e normalizar os dados
+│   │   └── exportar.ts          geração dos .xlsx e .docx
+│   └── types/global.d.ts
+├── public/favicon.svg
+├── deploy/nginx.conf            servidor de produção
+├── Dockerfile                   imagem de produção
+├── docs/HOSPEDAGEM.md           guia para a infra
+└── .github/workflows/ci.yml     checagem em Mac, Windows e Linux
+```
+
 ## Notas técnicas
 
 - `src/lib/storage.ts` usa `window.storage` quando o ambiente oferece
   (Electron, Capacitor, extensão) e cai para `localStorage` no navegador.
+- A biblioteca `xlsx` vem do CDN oficial da SheetJS (a versão do npm tem
+  vulnerabilidades sem correção). O `npm install` baixa de lá sozinho.
 - `.gitattributes` mantém o fim de linha igual (LF) no Mac e no Windows, para
   não aparecer diferença falsa no arquivo inteiro.
