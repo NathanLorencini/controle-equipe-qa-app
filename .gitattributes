@@ -1,0 +1,6 @@
+# Mesmo fim de linha (LF) no Mac e no Windows, sem diff falso entre maquinas
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.jpg binary
+*.ico binary

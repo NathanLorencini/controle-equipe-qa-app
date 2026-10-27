@@ -1,0 +1,12 @@
+# Dependencias: cada maquina instala as suas (npm install), com os binarios do proprio sistema
+node_modules/
+
+# Build
+dist/
+
+# Sistema e editor
+.DS_Store
+Thumbs.db
+*.log
+.vscode/*
+!.vscode/extensions.json
