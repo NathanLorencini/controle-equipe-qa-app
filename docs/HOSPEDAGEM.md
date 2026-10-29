@@ -15,7 +15,7 @@
 
 ## ⚠️ Antes de publicar: onde ficam os dados
 
-O app grava os dados **no navegador de cada usuário** (`localStorage`, chave
+O app grava os dados **no navegador de cada usuário** (`localStorage`, chave.
 `qa-equipe-dados`). Hospedar o app **não** cria uma base compartilhada:
 
 - cada pessoa vê só o que ela mesma cadastrou, naquele navegador;
