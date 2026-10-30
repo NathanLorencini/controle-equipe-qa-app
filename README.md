@@ -81,6 +81,32 @@ Os dados ficam salvos **no navegador da sua máquina** (`localStorage`). Por iss
 - limpar os dados do navegador (ou usar janela anônima) **apaga** tudo;
 - para guardar ou compartilhar, use **Exportar .xlsx / .docx**.
 
+### Como conectar um banco de dados (ainda não feito)
+
+Para todos verem os mesmos dados, o app precisa de um backend (API + banco).
+Hoje ele não tem. O caminho, quando for decidido:
+
+1. **Escolher o banco conforme a hospedagem.**
+   - Servidor ou container com disco persistente (Docker, VM): **SQLite** num
+     volume resolve. O Node 22.13+ já traz o `node:sqlite`, sem dependência.
+   - Hospedagem estática/serverless (Vercel, Netlify, Azure Static Web Apps):
+     não há disco persistente; use um banco gerenciado (**Postgres**).
+2. **Criar a API** (pode ser um servidor Node pequeno que também serve o
+   `dist/`), com rotas para listar, criar, alterar e remover QAs e projetos.
+   Gravar campo a campo (`PATCH`), e não a lista inteira, para duas pessoas
+   editando ao mesmo tempo não apagarem o trabalho uma da outra.
+3. **Trocar o armazenamento na tela.** O ponto de troca é um só:
+   `src/lib/storage.ts` (e `carregar`/`salvar` em `src/lib/dados.ts`). Eles
+   passam a chamar a API em vez do `localStorage`. Para as alterações dos
+   outros aparecerem sem F5, a tela consulta a API de tempos em tempos.
+4. **Importar os dados antigos.** O que cada pessoa tem no navegador (chave
+   `qa-equipe-dados` do `localStorage`) deve ser oferecido para envio à base,
+   acrescentando e nunca substituindo.
+5. **Hospedagem.** Volume para o banco, backup diário e **acesso restrito**
+   (SSO no proxy ou VPN): o app não tem login, e com dados compartilhados quem
+   abrir a URL lê e altera tudo. Atualizar o `Dockerfile`, o
+   `docs/HOSPEDAGEM.md` e o CI.
+
 ## 5. Atualizar para a versão mais nova
 
 Na pasta do projeto:
