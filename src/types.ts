@@ -21,5 +21,11 @@ export interface Projeto {
 export interface Membro {
   id: number;
   nome: string;
+  /** Usuário dono do QA (só ele, e o admin, alteram). null = sem dono. */
+  usuarioId?: number | null;
+  usuario?: string | null;
   projetos: Projeto[];
 }
+
+/** admin: tudo; gestor: cria e remove QAs; qa: só o próprio QA. */
+export type Perfil = 'admin' | 'gestor' | 'qa';

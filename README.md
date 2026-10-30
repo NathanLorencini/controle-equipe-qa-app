@@ -58,10 +58,10 @@ Windows). Não precisa apagar nem copiar nada.
    outro terminal, na mesma pasta; a senha é pedida sem aparecer na tela):
 
    ```bash
-   DB_PATH=dados/dev.db npm run usuarios -- criar seu-nome
+   DB_PATH=dados/dev.db npm run usuarios -- criar seu-nome --perfil admin
    ```
 
-   No Windows (PowerShell): `$env:DB_PATH="dados/dev.db"; npm run usuarios -- criar seu-nome`.
+   No Windows (PowerShell): `$env:DB_PATH="dados/dev.db"; npm run usuarios -- criar seu-nome --perfil admin`.
 4. Abra no navegador o endereço que aparecer, normalmente
    **http://localhost:5173** (no Mac, `⌘ + clique` no link abre direto), e entre
    com o usuário criado.
@@ -95,6 +95,25 @@ servidor rodar `usuarios.mjs senha <seu-usuario>` (ver
 [`docs/HOSPEDAGEM.md`](docs/HOSPEDAGEM.md#usuários)).
 
 5 senhas erradas seguidas bloqueiam o usuário por 5 minutos.
+
+### Quem pode o que
+
+Todos que fazem login **veem** todos os QAs. Para **alterar**, depende do perfil:
+
+| | admin | gestor | qa |
+|---|:---:|:---:|:---:|
+| Ver todos os QAs e exportar | ✓ | ✓ | ✓ |
+| Criar QA (escolhendo o usuário dono) | ✓ | ✓ | — |
+| Remover QA | ✓ | ✓ | — |
+| Alterar os projetos do **próprio** QA | ✓ | ✓ | ✓ |
+| Alterar os projetos de **outros** QAs | ✓ | — | — |
+| Trocar o dono de um QA | ✓ | — | — |
+| Importar dados antigos do navegador | ✓ | — | — |
+
+Cada QA tem um **usuário dono**, escolhido ao criar. O QA de outra pessoa
+aparece com o selo **somente leitura** e os campos bloqueados. A regra vale no
+servidor: mesmo chamando a API direto, a gravação é recusada. QA sem dono só o
+admin altera.
 
 ### Onde ficam os dados
 
@@ -179,7 +198,7 @@ login e da API. Como hospedar: [`docs/HOSPEDAGEM.md`](docs/HOSPEDAGEM.md).
 | `npm install`     | baixa as dependências (depois de clonar ou de `git pull`) |
 | `npm run dev`     | sobe API + tela em modo desenvolvimento      |
 | `npm start`       | sobe o servidor de produção (tela + login + API na porta 8080) |
-| `npm run usuarios -- <comando>` | `listar`, `criar <usuario>`, `senha <usuario>`, `remover <usuario>` |
+| `npm run usuarios -- <comando>` | `listar`, `criar <usuario> [--perfil admin\|gestor\|qa]`, `senha <usuario>`, `perfil <usuario> <perfil>`, `remover <usuario>` |
 | `npm test`        | testes do servidor (login, base, segurança)  |
 | `npm run build`   | confere os tipos e gera a versão final em `dist/` |
 | `npm run preview` | serve o `dist/` para conferir o build        |

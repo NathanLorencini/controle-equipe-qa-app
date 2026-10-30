@@ -139,8 +139,8 @@ export function useBaseCompartilhada(avisar: (mensagem: string) => void) {
     return () => window.removeEventListener('pagehide', aoSair);
   }, []);
 
-  const adicionarMembro = useCallback(async (nome: string) => {
-    const novo = await grava(() => api.criaMembro(nome));
+  const adicionarMembro = useCallback(async (nome: string, usuarioId: number | null) => {
+    const novo = await grava(() => api.criaMembro(nome, usuarioId));
     if (novo) setMembros((lista) => (lista.some((m) => m.id === novo.id) ? lista : [...lista, novo]));
     return novo;
   }, [grava]);
@@ -148,6 +148,10 @@ export function useBaseCompartilhada(avisar: (mensagem: string) => void) {
   const removerMembro = useCallback(async (id: number) => {
     if (await grava(() => api.removeMembro(id))) setMembros((lista) => lista.filter((m) => m.id !== id));
   }, [grava]);
+
+  const vincularMembro = useCallback(async (id: number, usuarioId: number | null) => {
+    if (await grava(() => api.vinculaMembro(id, usuarioId))) await recarrega();
+  }, [grava, recarrega]);
 
   const adicionarProjeto = useCallback(async (membroId: number) => {
     const p = await grava(() => api.criaProjeto(membroId));
@@ -188,6 +192,6 @@ export function useBaseCompartilhada(avisar: (mensagem: string) => void) {
 
   return {
     membros, situacao,
-    adicionarMembro, removerMembro, adicionarProjeto, alterarProjeto, removerProjeto, importar,
+    adicionarMembro, removerMembro, vincularMembro, adicionarProjeto, alterarProjeto, removerProjeto, importar,
   };
 }

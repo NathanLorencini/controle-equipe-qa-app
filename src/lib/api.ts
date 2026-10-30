@@ -1,4 +1,4 @@
-import type { Membro, Projeto } from '../types';
+import type { Membro, Perfil, Projeto } from '../types';
 
 /**
  * Cliente da API (server/index.mjs).
@@ -15,8 +15,15 @@ export interface Dados {
 }
 
 export interface Eu {
+  id: number;
   usuario: string;
+  perfil: Perfil;
   trocarSenha: boolean;
+}
+
+export interface Usuario {
+  id: number;
+  usuario: string;
 }
 
 export const SESSAO_ENCERRADA = 'controle-sessao-encerrada';
@@ -57,7 +64,11 @@ export const api = {
 
   dados: () => chama<Dados>('GET', 'dados'),
   versao: () => chama<{ versao: number }>('GET', 'versao').then((r) => r.versao),
-  criaMembro: (nome: string) => chama<Membro>('POST', 'membros', { nome }),
+  /** Usuários do login, para escolher o dono de um QA (admin e gestor). */
+  usuarios: () => chama<Usuario[]>('GET', 'usuarios'),
+  criaMembro: (nome: string, usuarioId: number | null) => chama<Membro>('POST', 'membros', { nome, usuarioId }),
+  /** Troca o dono do QA (só admin). */
+  vinculaMembro: (id: number, usuarioId: number | null) => chama<{ ok: true }>('PATCH', `membros/${id}`, { usuarioId }),
   removeMembro: (id: number) => chama<{ ok: true }>('DELETE', `membros/${id}`),
   criaProjeto: (membroId: number) => chama<Projeto>('POST', `membros/${membroId}/projetos`),
   /** `keepalive`: termina de gravar mesmo se a pessoa fechar a aba. */

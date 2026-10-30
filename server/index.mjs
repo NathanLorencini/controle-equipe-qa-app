@@ -123,23 +123,81 @@ function origemEstranha(req) {
   }
 }
 
+/**
+ * QUEM PODE O QUE (30/10/2026). Todos os logados VEEM tudo; gravar depende:
+ *   admin  -- tudo;
+ *   gestor -- cria e remove QAs; nos projetos, so os do proprio QA;
+ *   qa     -- so os projetos do proprio QA (o QA de que e dono).
+ * QA sem dono so o admin edita. A regra vale aqui, no servidor: a tela so
+ * esconde o que a pessoa nao pode, quem chama a API direto ouve 403.
+ */
+export function pode(quem, acao, donoDoQa = null) {
+  if (quem.perfil === 'admin') return true;
+  if (acao === 'criar-qa' || acao === 'remover-qa' || acao === 'listar-usuarios') return quem.perfil === 'gestor';
+  if (acao === 'editar-qa') return donoDoQa !== null && donoDoQa === quem.id;
+  return false; // vincular dono, importar, backup: so admin
+}
+
+const NEGADO = {
+  'criar-qa': 'só o administrador ou o gestor criam QAs',
+  'remover-qa': 'só o administrador ou o gestor removem QAs',
+  'editar-qa': 'você só pode alterar o seu próprio QA',
+  'vincular-qa': 'só o administrador troca o dono de um QA',
+  importar: 'só o administrador importa dados',
+  backup: 'só o administrador baixa o backup',
+  'listar-usuarios': 'sem permissão para ver os usuários',
+};
+const proibido = (acao) => [403, { erro: NEGADO[acao] }];
+const QA_SUMIU = [404, { erro: 'QA não encontrado (pode ter sido removido por outra pessoa)' }];
+const PROJETO_SUMIU = [404, { erro: 'projeto não encontrado (pode ter sido removido por outra pessoa)' }];
+
 /** Rotas que exigem sessao: [metodo, padrao, (banco, params, corpo, quem) => [status, dados]]. */
 const ROTAS = [
   ['GET', /^\/api\/versao$/, (b) => [200, { versao: b.versao() }]],
   ['GET', /^\/api\/dados$/, (b) => [200, b.dados()]],
-  ['POST', /^\/api\/membros$/, (b, _, c, q) => [201, b.criaMembro(c.nome, q.usuario)]],
-  ['PATCH', /^\/api\/membros\/(\d+)$/, (b, [id], c, q) => (b.renomeiaMembro(id, c.nome, q.usuario) ? [200, { ok: true }] : [404, { erro: 'QA não encontrado' }])],
-  ['DELETE', /^\/api\/membros\/(\d+)$/, (b, [id]) => (b.removeMembro(id) ? [200, { ok: true }] : [404, { erro: 'QA não encontrado' }])],
+  ['GET', /^\/api\/usuarios$/, (b, _, __, q) => (pode(q, 'listar-usuarios')
+    ? [200, b.listaUsuarios().map((u) => ({ id: u.id, usuario: u.usuario }))] : proibido('listar-usuarios'))],
+  ['POST', /^\/api\/membros$/, (b, _, c, q) => (pode(q, 'criar-qa')
+    ? [201, b.criaMembro(c.nome, q.usuario, c.usuarioId)] : proibido('criar-qa'))],
+  ['PATCH', /^\/api\/membros\/(\d+)$/, (b, [id], c, q) => {
+    const dono = b.donoDoMembro(id);
+    if (dono === undefined) return QA_SUMIU;
+    if ('usuarioId' in c) {
+      if (!pode(q, 'vincular-qa')) return proibido('vincular-qa');
+      b.vinculaMembro(id, c.usuarioId, q.usuario);
+    }
+    if ('nome' in c) {
+      if (!pode(q, 'editar-qa', dono)) return proibido('editar-qa');
+      b.renomeiaMembro(id, c.nome, q.usuario);
+    }
+    return [200, { ok: true }];
+  }],
+  ['DELETE', /^\/api\/membros\/(\d+)$/, (b, [id], _, q) => {
+    if (!pode(q, 'remover-qa')) return proibido('remover-qa');
+    return b.removeMembro(id) ? [200, { ok: true }] : QA_SUMIU;
+  }],
   ['POST', /^\/api\/membros\/(\d+)\/projetos$/, (b, [id], _, q) => {
+    const dono = b.donoDoMembro(id);
+    if (dono === undefined) return QA_SUMIU;
+    if (!pode(q, 'editar-qa', dono)) return proibido('editar-qa');
     const p = b.criaProjeto(id, q.usuario);
-    return p ? [201, p] : [404, { erro: 'QA não encontrado (pode ter sido removido por outra pessoa)' }];
+    return p ? [201, p] : QA_SUMIU;
   }],
   ['PATCH', /^\/api\/projetos\/(\d+)$/, (b, [id], c, q) => {
+    const membro = b.membroDoProjeto(id);
+    if (membro === undefined) return PROJETO_SUMIU;
+    if (!pode(q, 'editar-qa', b.donoDoMembro(membro))) return proibido('editar-qa');
     const p = b.alteraProjeto(id, c, q.usuario);
-    return p ? [200, p] : [404, { erro: 'projeto não encontrado (pode ter sido removido por outra pessoa)' }];
+    return p ? [200, p] : PROJETO_SUMIU;
   }],
-  ['DELETE', /^\/api\/projetos\/(\d+)$/, (b, [id]) => (b.removeProjeto(id) ? [200, { ok: true }] : [404, { erro: 'projeto não encontrado' }])],
-  ['POST', /^\/api\/importar$/, (b, _, c, q) => [200, b.importa(c.membros, q.usuario)]],
+  ['DELETE', /^\/api\/projetos\/(\d+)$/, (b, [id], _, q) => {
+    const membro = b.membroDoProjeto(id);
+    if (membro === undefined) return PROJETO_SUMIU;
+    if (!pode(q, 'editar-qa', b.donoDoMembro(membro))) return proibido('editar-qa');
+    return b.removeProjeto(id) ? [200, { ok: true }] : PROJETO_SUMIU;
+  }],
+  ['POST', /^\/api\/importar$/, (b, _, c, q) => (pode(q, 'importar')
+    ? [200, b.importa(c.membros, q.usuario)] : proibido('importar'))],
 ];
 
 async function api(banco, req, res, caminho, base) {
@@ -167,7 +225,7 @@ async function api(banco, req, res, caminho, base) {
       }
       for (const k of chaves) falhas.delete(k);
       const token = banco.abreSessao(u.id);
-      return json(res, 200, { usuario: u.usuario, trocarSenha: u.trocarSenha },
+      return json(res, 200, { id: u.id, usuario: u.usuario, perfil: u.perfil, trocarSenha: u.trocarSenha },
         { 'Set-Cookie': cookie(req, token, SESSAO_HORAS * 3600, base) });
     }
     if (caminho === '/api/logout' && req.method === 'POST') {
@@ -181,7 +239,7 @@ async function api(banco, req, res, caminho, base) {
     if (!quem) return json(res, 401, { erro: 'faça login' });
 
     if (caminho === '/api/eu' && req.method === 'GET') {
-      return json(res, 200, { usuario: quem.usuario, trocarSenha: quem.trocarSenha });
+      return json(res, 200, { id: quem.id, usuario: quem.usuario, perfil: quem.perfil, trocarSenha: quem.trocarSenha });
     }
     if (caminho === '/api/senha' && req.method === 'POST') {
       const c = await leCorpo(req);
@@ -200,6 +258,7 @@ async function api(banco, req, res, caminho, base) {
     }
     // Copia de seguranca: tudo em um JSON, para baixar pelo navegador.
     if (req.method === 'GET' && caminho === '/api/backup') {
+      if (!pode(quem, 'backup')) return json(res, 403, { erro: NEGADO.backup });
       const data = new Date().toISOString().slice(0, 10);
       return json(res, 200, banco.dados(),
         { 'Content-Disposition': `attachment; filename="controle-equipe-qa-${data}.json"` });

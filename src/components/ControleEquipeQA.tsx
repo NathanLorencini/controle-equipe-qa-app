@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Download, KeyRound, LogOut, Plus, Upload, User } from 'lucide-react';
 import type { Membro } from '../types';
+import { api, type Eu, type Usuario } from '../lib/api';
 import { carregarDoNavegador, marcarImportado } from '../lib/dados';
 import { useBaseCompartilhada, type Situacao } from '../lib/useBaseCompartilhada';
 import {
@@ -27,16 +28,23 @@ const SITUACAO: Record<Situacao, { texto: string; cor: string }> = {
 };
 
 interface Props {
-  usuario: string;
+  eu: Eu;
   onSair: () => void;
   onTrocarSenha: () => void;
 }
 
-export default function ControleEquipeQA({ usuario, onSair, onTrocarSenha }: Props) {
+export default function ControleEquipeQA({ eu, onSair, onTrocarSenha }: Props) {
   const {
-    membros, situacao, adicionarMembro: criarMembro, removerMembro: apagarMembro,
+    membros, situacao, adicionarMembro: criarMembro, removerMembro: apagarMembro, vincularMembro,
     adicionarProjeto, alterarProjeto, removerProjeto, importar,
   } = useBaseCompartilhada(avisar);
+  // Quem pode o que (a regra de verdade está no servidor; aqui só se esconde
+  // o que a pessoa não pode fazer).
+  const admin = eu.perfil === 'admin';
+  const gereQAs = admin || eu.perfil === 'gestor';
+  const podeEditar = (m: Membro) => admin || (m.usuarioId != null && m.usuarioId === eu.id);
+  const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+  const [donoNovo, setDonoNovo] = useState('');
   const [nomeQA, setNomeQA] = useState('');
   const [busca, setBusca] = useState('');
   const [abertos, setAbertos] = useState<Record<number, boolean>>({});
@@ -44,16 +52,19 @@ export default function ControleEquipeQA({ usuario, onSair, onTrocarSenha }: Pro
   const [doNavegador, setDoNavegador] = useState<Membro[]>([]);
 
   useEffect(() => {
-    carregarDoNavegador().then(setDoNavegador);
-  }, []);
+    if (admin) carregarDoNavegador().then(setDoNavegador);
+    if (gereQAs) api.usuarios().then(setUsuarios).catch(() => setUsuarios([]));
+  }, [admin, gereQAs]);
 
   const adicionarMembro = async () => {
     const nome = nomeQA.trim();
     if (!nome) { alert('Por favor, insira o nome do QA'); return; }
-    const novo = await criarMembro(nome);
+    if (!donoNovo) { alert('Escolha o usuário dono deste QA (quem vai poder alterá-lo).'); return; }
+    const novo = await criarMembro(nome, Number(donoNovo));
     if (novo) {
       setAbertos((a) => ({ ...a, [novo.id]: true }));
       setNomeQA('');
+      setDonoNovo('');
     }
   };
 
@@ -82,7 +93,10 @@ export default function ControleEquipeQA({ usuario, onSair, onTrocarSenha }: Pro
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
         <div className="flex flex-wrap items-center justify-end gap-3 mb-3 text-sm text-white/90">
-          <span className="flex items-center gap-1"><User className="w-4 h-4" />{usuario}</span>
+          <span className="flex items-center gap-1">
+            <User className="w-4 h-4" />{eu.usuario}
+            {eu.perfil !== 'qa' && <span className="opacity-70">({eu.perfil === 'admin' ? 'administrador' : 'gestor'})</span>}
+          </span>
           <button onClick={onTrocarSenha} className="flex items-center gap-1 px-2 py-1 rounded-md hover:bg-white/10">
             <KeyRound className="w-4 h-4" />Trocar senha
           </button>
@@ -120,7 +134,7 @@ export default function ControleEquipeQA({ usuario, onSair, onTrocarSenha }: Pro
             </div>
           )}
 
-          <div className="flex gap-3 mb-4">
+          {gereQAs && <div className="flex flex-wrap gap-3 mb-4">
             <input
               type="text"
               value={nomeQA}
@@ -128,12 +142,21 @@ export default function ControleEquipeQA({ usuario, onSair, onTrocarSenha }: Pro
               onKeyDown={(e) => e.key === 'Enter' && adicionarMembro()}
               placeholder="Nome do QA"
               aria-label="Nome do QA"
-              className="flex-1 min-w-0 px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
+              className="flex-1 min-w-[12rem] px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
             />
+            <select
+              value={donoNovo}
+              onChange={(e) => setDonoNovo(e.target.value)}
+              aria-label="Usuário dono do QA"
+              className="px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-purple-500 text-gray-700"
+            >
+              <option value="">Usuário dono…</option>
+              {usuarios.map((u) => <option key={u.id} value={u.id}>{u.usuario}</option>)}
+            </select>
             <button onClick={adicionarMembro} className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-2 transition-colors">
               <Plus className="w-5 h-5" />Adicionar QA
             </button>
-          </div>
+          </div>}
 
           <div className="flex flex-wrap items-center gap-3 mb-8">
             <input
@@ -177,6 +200,10 @@ export default function ControleEquipeQA({ usuario, onSair, onTrocarSenha }: Pro
               key={membro.id}
               membro={membro}
               aberto={!!abertos[membro.id]}
+              podeEditar={podeEditar(membro)}
+              podeRemover={gereQAs}
+              usuarios={admin ? usuarios : undefined}
+              onVincular={admin ? (usuarioId) => void vincularMembro(membro.id, usuarioId) : undefined}
               onAlternar={() => setAbertos((a) => ({ ...a, [membro.id]: !a[membro.id] }))}
               onRemover={() => removerMembro(membro.id)}
               onAdicionarProjeto={() => void adicionarProjeto(membro.id)}

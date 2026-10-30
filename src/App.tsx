@@ -52,5 +52,5 @@ export default function App() {
       />
     );
   }
-  return <ControleEquipeQA usuario={eu.usuario} onSair={sair} onTrocarSenha={() => setTrocandoSenha(true)} />;
+  return <ControleEquipeQA eu={eu} onSair={sair} onTrocarSenha={() => setTrocandoSenha(true)} />;
 }

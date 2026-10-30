@@ -8,6 +8,12 @@
  *
  * Usuarios: senha so como hash scrypt (sal proprio por usuario). Sessoes: o
  * banco guarda o hash do token, nunca o token que esta no cookie.
+ *
+ * Perfis (quem pode o que fica em server/index.mjs, `pode`):
+ *   admin  -- tudo;
+ *   gestor -- cria e remove QAs; nos projetos, so os do proprio QA;
+ *   qa     -- so os projetos do proprio QA.
+ * Cada QA (membro) tem um dono: o usuario escolhido ao criar.
  */
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
@@ -15,6 +21,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export const SITUACOES = ['Planejamento', 'Em Andamento', 'Testes', 'Homologação', 'Concluído', 'Pausado'];
+export const PERFIS = ['admin', 'gestor', 'qa'];
 
 const MAX_NOME = 200;
 const MAX_TEXTO = 5000;
@@ -93,6 +100,7 @@ export function abreBanco(caminho) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       usuario TEXT NOT NULL UNIQUE,
       senha_hash TEXT NOT NULL,
+      perfil TEXT NOT NULL DEFAULT 'qa',
       trocar_senha INTEGER NOT NULL DEFAULT 1,
       criado_em TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -104,6 +112,7 @@ export function abreBanco(caminho) {
     CREATE TABLE IF NOT EXISTS membros (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nome TEXT NOT NULL,
+      usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
       atualizado_em TEXT NOT NULL DEFAULT (datetime('now')),
       atualizado_por TEXT NOT NULL DEFAULT ''
     );
@@ -120,6 +129,12 @@ export function abreBanco(caminho) {
     );
     CREATE INDEX IF NOT EXISTS projetos_membro ON projetos (membro_id);
   `);
+  // Banco criado antes dos perfis (30/10/2026): acrescenta as colunas que faltam.
+  const colunas = (tabela) => db.prepare(`PRAGMA table_info(${tabela})`).all().map((c) => c.name);
+  if (!colunas('usuarios').includes('perfil')) db.exec("ALTER TABLE usuarios ADD COLUMN perfil TEXT NOT NULL DEFAULT 'qa'");
+  if (!colunas('membros').includes('usuario_id')) {
+    db.exec('ALTER TABLE membros ADD COLUMN usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL');
+  }
 
   const sobeVersao = () => db.prepare("UPDATE meta SET valor = valor + 1 WHERE chave = 'versao'").run();
   const versao = () => db.prepare("SELECT valor FROM meta WHERE chave = 'versao'").get().valor;
@@ -139,12 +154,17 @@ export function abreBanco(caminho) {
   }
 
   // ---------------------------------------------------------------- usuarios
-  function criaUsuario(usuario, senha, { trocarSenha = true } = {}) {
+  function perfilValido(perfil) {
+    if (!PERFIS.includes(perfil)) throw new ErroDeEntrada(`perfil: ${PERFIS.join(', ')}`);
+    return perfil;
+  }
+
+  function criaUsuario(usuario, senha, { trocarSenha = true, perfil = 'qa' } = {}) {
     const u = nomeDeUsuario(usuario);
     const hash = hashDaSenha(validaSenhaNova(senha));
     try {
-      db.prepare('INSERT INTO usuarios (usuario, senha_hash, trocar_senha) VALUES (?, ?, ?)')
-        .run(u, hash, trocarSenha ? 1 : 0);
+      db.prepare('INSERT INTO usuarios (usuario, senha_hash, perfil, trocar_senha) VALUES (?, ?, ?, ?)')
+        .run(u, hash, perfilValido(perfil), trocarSenha ? 1 : 0);
     } catch (e) {
       if (/UNIQUE/.test(String(e.message))) throw new ErroDeEntrada(`o usuário "${u}" já existe`);
       throw e;
@@ -165,13 +185,19 @@ export function abreBanco(caminho) {
     return true;
   }
 
+  /** Muda o perfil; as sessoes abertas passam a valer com o perfil novo na hora. */
+  function definePerfil(usuario, perfil) {
+    return db.prepare('UPDATE usuarios SET perfil = ? WHERE usuario = ?')
+      .run(perfilValido(perfil), nomeDeUsuario(usuario)).changes > 0;
+  }
+
   function removeUsuario(usuario) {
     return db.prepare('DELETE FROM usuarios WHERE usuario = ?').run(nomeDeUsuario(usuario)).changes > 0;
   }
 
   function listaUsuarios() {
-    return db.prepare('SELECT usuario, trocar_senha AS trocarSenha, criado_em AS criadoEm FROM usuarios ORDER BY usuario').all()
-      .map((u) => ({ ...u, trocarSenha: !!u.trocarSenha }));
+    return db.prepare(`SELECT id, usuario, perfil, trocar_senha AS trocarSenha, criado_em AS criadoEm
+      FROM usuarios ORDER BY usuario`).all().map((u) => ({ ...u, trocarSenha: !!u.trocarSenha }));
   }
 
   /** {usuario, trocarSenha} se a senha confere; senao null. */
@@ -179,7 +205,8 @@ export function abreBanco(caminho) {
     const u = String(usuario ?? '').trim().toLowerCase();
     const linha = db.prepare('SELECT * FROM usuarios WHERE usuario = ?').get(u);
     const ok = confereSenha(String(senha ?? ''), linha ? linha.senha_hash : HASH_FALSO);
-    return ok && linha ? { id: linha.id, usuario: linha.usuario, trocarSenha: !!linha.trocar_senha } : null;
+    return ok && linha
+      ? { id: linha.id, usuario: linha.usuario, perfil: linha.perfil, trocarSenha: !!linha.trocar_senha } : null;
   }
 
   /** Abre sessao: devolve o token que vai no cookie (o banco guarda so o hash). */
@@ -194,10 +221,10 @@ export function abreBanco(caminho) {
 
   function sessao(token) {
     if (!token) return null;
-    const s = db.prepare(`SELECT u.id, u.usuario, u.trocar_senha FROM sessoes s
+    const s = db.prepare(`SELECT u.id, u.usuario, u.perfil, u.trocar_senha FROM sessoes s
       JOIN usuarios u ON u.id = s.usuario_id WHERE s.token_hash = ? AND s.expira_em > ?`)
       .get(hashDoToken(token), Date.now());
-    return s ? { id: s.id, usuario: s.usuario, trocarSenha: !!s.trocar_senha } : null;
+    return s ? { id: s.id, usuario: s.usuario, perfil: s.perfil, trocarSenha: !!s.trocar_senha } : null;
   }
 
   function fechaSessao(token) {
@@ -228,8 +255,9 @@ export function abreBanco(caminho) {
   }
 
   function dados() {
-    const membros = db.prepare('SELECT id, nome FROM membros ORDER BY id').all()
-      .map((m) => ({ id: m.id, nome: m.nome, projetos: [] }));
+    const membros = db.prepare(`SELECT m.id, m.nome, m.usuario_id, u.usuario FROM membros m
+      LEFT JOIN usuarios u ON u.id = m.usuario_id ORDER BY m.id`).all()
+      .map((m) => ({ id: m.id, nome: m.nome, usuarioId: m.usuario_id ?? null, usuario: m.usuario ?? null, projetos: [] }));
     const porId = new Map(membros.map((m) => [m.id, m]));
     for (const p of db.prepare('SELECT * FROM projetos ORDER BY id').all()) {
       porId.get(p.membro_id)?.projetos.push(projetoDaLinha(p));
@@ -237,13 +265,42 @@ export function abreBanco(caminho) {
     return { versao: versao(), membros };
   }
 
-  function criaMembro(nome, quem = '') {
+  /** Usuario dono de um QA: id existente, ou null (sem dono -- so o admin edita). */
+  function donoValido(usuarioId) {
+    if (usuarioId === null || usuarioId === undefined || usuarioId === '') return null;
+    const u = db.prepare('SELECT id, usuario FROM usuarios WHERE id = ?').get(Number(usuarioId));
+    if (!u) throw new ErroDeEntrada('usuário dono do QA não encontrado');
+    return u;
+  }
+
+  function criaMembro(nome, quem = '', usuarioId = null) {
     const n = texto(nome, MAX_NOME, 'nome').trim();
     if (!n) throw new ErroDeEntrada('nome do QA vazio');
+    const dono = donoValido(usuarioId);
     return transacao(() => {
-      const { lastInsertRowid } = db.prepare('INSERT INTO membros (nome, atualizado_por) VALUES (?, ?)').run(n, quem);
-      return { id: Number(lastInsertRowid), nome: n, projetos: [] };
+      const { lastInsertRowid } = db.prepare('INSERT INTO membros (nome, usuario_id, atualizado_por) VALUES (?, ?, ?)')
+        .run(n, dono?.id ?? null, quem);
+      return { id: Number(lastInsertRowid), nome: n, usuarioId: dono?.id ?? null, usuario: dono?.usuario ?? null, projetos: [] };
     });
+  }
+
+  /** Troca o dono de um QA (null = sem dono). */
+  function vinculaMembro(id, usuarioId, quem = '') {
+    const dono = donoValido(usuarioId);
+    return transacao(() => db.prepare(
+      "UPDATE membros SET usuario_id = ?, atualizado_em = datetime('now'), atualizado_por = ? WHERE id = ?")
+      .run(dono?.id ?? null, quem, id).changes > 0);
+  }
+
+  /** Dono do QA (usuario_id ou null); undefined se o QA nao existe. */
+  function donoDoMembro(id) {
+    const m = db.prepare('SELECT usuario_id FROM membros WHERE id = ?').get(id);
+    return m ? (m.usuario_id ?? null) : undefined;
+  }
+
+  /** QA do projeto; undefined se o projeto nao existe. */
+  function membroDoProjeto(id) {
+    return db.prepare('SELECT membro_id FROM projetos WHERE id = ?').get(id)?.membro_id;
   }
 
   function renomeiaMembro(id, nome, quem = '') {
@@ -319,9 +376,9 @@ export function abreBanco(caminho) {
   }
 
   return {
-    versao, dados, criaMembro, renomeiaMembro, removeMembro,
+    versao, dados, criaMembro, renomeiaMembro, removeMembro, vinculaMembro, donoDoMembro, membroDoProjeto,
     criaProjeto, alteraProjeto, removeProjeto, importa,
-    criaUsuario, defineSenha, removeUsuario, listaUsuarios,
+    criaUsuario, defineSenha, definePerfil, removeUsuario, listaUsuarios,
     autentica, abreSessao, sessao, fechaSessao, trocaSenha,
     fecha: () => db.close(),
   };

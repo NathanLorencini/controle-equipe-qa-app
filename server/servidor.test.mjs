@@ -41,8 +41,10 @@ before(async () => {
   writeFileSync(join(pasta, 'site', 'index.html'), '<div id="root"></div>');
   writeFileSync(join(pasta, 'site', 'assets', 'app-abc.js'), 'console.log(1)');
   banco = abreBanco(join(pasta, 'banco', 'teste.db'));
-  banco.criaUsuario('ana', 'senha-da-ana', { trocarSenha: false });
-  banco.criaUsuario('bia', 'senha-da-bia', { trocarSenha: false });
+  // ana e bia sao admin: os testes de dados abaixo sao de BASE (duas pessoas
+  // gravando); quem pode o que fica no bloco "permissoes".
+  banco.criaUsuario('ana', 'senha-da-ana', { trocarSenha: false, perfil: 'admin' });
+  banco.criaUsuario('bia', 'senha-da-bia', { trocarSenha: false, perfil: 'admin' });
   servidor = criaServidor({ banco, pastaSite: join(pasta, 'site') });
   await new Promise((ok) => servidor.listen(0, ok));
   base = `http://127.0.0.1:${servidor.address().port}`;
@@ -215,6 +217,83 @@ test('importar dados do navegador acrescenta, nunca substitui', async () => {
   const fabi = depois.at(-1);
   assert.equal(fabi.projetos[0].percentualFoco, 40, 'percentual antigo gravado como texto vira numero');
   assert.equal(fabi.projetos[0].situacao, 'Testes');
+});
+
+// ------------------------------------------------------------------ permissoes
+test('permissoes: admin tudo, gestor cria/remove QA, qa so o proprio QA', async () => {
+  banco.criaUsuario('jo', 'senha-do-jo', { trocarSenha: false, perfil: 'admin' });
+  banco.criaUsuario('nat', 'senha-do-nat', { trocarSenha: false, perfil: 'gestor' });
+  banco.criaUsuario('lais', 'senha-da-lais', { trocarSenha: false });
+  banco.criaUsuario('rom', 'senha-do-rom', { trocarSenha: false });
+  const [jo, nat, lais, rom] = [pessoa(), pessoa(), pessoa(), pessoa()];
+  await jo.entra('jo', 'senha-do-jo');
+  await nat.entra('nat', 'senha-do-nat');
+  await lais.entra('lais', 'senha-da-lais');
+  await rom.entra('rom', 'senha-do-rom');
+  const eu = (await lais.chama('GET', '/api/eu')).corpo;
+  assert.equal(eu.perfil, 'qa');
+
+  // Criar QA: so gestor e admin; o dono e escolhido na criacao.
+  const ids = Object.fromEntries((await nat.chama('GET', '/api/usuarios')).corpo.map((u) => [u.usuario, u.id]));
+  assert.equal((await lais.chama('GET', '/api/usuarios')).status, 403, 'qa nao lista usuarios');
+  assert.equal((await lais.chama('POST', '/api/membros', { nome: 'Outro' })).status, 403, 'qa nao cria QA');
+  const qaLais = await nat.chama('POST', '/api/membros', { nome: 'Lais', usuarioId: ids.lais });
+  assert.equal(qaLais.status, 201, 'gestor cria QA');
+  assert.equal(qaLais.corpo.usuario, 'lais');
+  const qaRom = (await jo.chama('POST', '/api/membros', { nome: 'Romario', usuarioId: ids.rom })).corpo;
+  const qaNat = (await jo.chama('POST', '/api/membros', { nome: 'Nathan', usuarioId: ids.nat })).corpo;
+  assert.equal((await nat.chama('POST', '/api/membros', { nome: 'X', usuarioId: 99999 })).status, 400, 'dono inexistente');
+
+  // Projetos: o dono mexe no proprio QA; ninguem (fora o admin) mexe no dos outros.
+  const pLais = await lais.chama('POST', `/api/membros/${qaLais.corpo.id}/projetos`);
+  assert.equal(pLais.status, 201, 'lais cria projeto no QA dela');
+  assert.equal((await lais.chama('PATCH', `/api/projetos/${pLais.corpo.id}`, { nome: 'Portal' })).status, 200);
+  assert.equal((await rom.chama('PATCH', `/api/projetos/${pLais.corpo.id}`, { nome: 'invadido' })).status, 403, 'romario nao altera o QA da lais');
+  assert.equal((await rom.chama('DELETE', `/api/projetos/${pLais.corpo.id}`)).status, 403);
+  assert.equal((await rom.chama('POST', `/api/membros/${qaLais.corpo.id}/projetos`)).status, 403);
+  assert.equal((await nat.chama('PATCH', `/api/projetos/${pLais.corpo.id}`, { nome: 'x' })).status, 403, 'gestor nao altera QA dos outros');
+  assert.equal((await nat.chama('POST', `/api/membros/${qaNat.id}/projetos`)).status, 201, 'gestor altera o proprio');
+  assert.equal((await jo.chama('PATCH', `/api/projetos/${pLais.corpo.id}`, { contras: 'pelo admin' })).status, 200, 'admin altera qualquer um');
+  const visto = (await rom.chama('GET', '/api/dados')).corpo.membros.find((m) => m.id === qaLais.corpo.id);
+  assert.equal(visto.projetos[0].nome, 'Portal', 'todos VEEM tudo; a tentativa negada nao gravou');
+
+  // Remover QA: gestor e admin; qa nao (nem o proprio).
+  assert.equal((await lais.chama('DELETE', `/api/membros/${qaLais.corpo.id}`)).status, 403);
+  assert.equal((await nat.chama('DELETE', `/api/membros/${qaRom.id}`)).status, 200, 'gestor remove QA');
+
+  // Dono: so o admin troca. Sem dono, so o admin edita.
+  assert.equal((await nat.chama('PATCH', `/api/membros/${qaLais.corpo.id}`, { usuarioId: ids.nat })).status, 403);
+  assert.equal((await jo.chama('PATCH', `/api/membros/${qaLais.corpo.id}`, { usuarioId: null })).status, 200);
+  assert.equal((await lais.chama('PATCH', `/api/projetos/${pLais.corpo.id}`, { nome: 'y' })).status, 403, 'sem dono, lais perdeu o acesso');
+  assert.equal((await jo.chama('PATCH', `/api/membros/${qaLais.corpo.id}`, { usuarioId: ids.lais })).status, 200);
+  assert.equal((await lais.chama('PATCH', `/api/projetos/${pLais.corpo.id}`, { nome: 'Portal 2' })).status, 200, 'dona de novo');
+
+  // Importar e backup: so admin.
+  assert.equal((await nat.chama('POST', '/api/importar', { membros: [] })).status, 403);
+  assert.equal((await lais.chama('GET', '/api/backup')).status, 403);
+  assert.equal((await jo.chama('GET', '/api/backup')).status, 200);
+
+  // Perfil mudado no servidor vale na hora, sem novo login.
+  banco.definePerfil('lais', 'gestor');
+  assert.equal((await lais.chama('GET', '/api/usuarios')).status, 200);
+  banco.definePerfil('lais', 'qa');
+});
+
+test('banco antigo (sem perfil nem dono) ganha as colunas sozinho e continua entrando', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const arq = join(pasta, 'antigo.db');
+  const velho = new DatabaseSync(arq);
+  velho.exec(`CREATE TABLE usuarios (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL UNIQUE,
+      senha_hash TEXT NOT NULL, trocar_senha INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL DEFAULT (datetime('now')));
+    CREATE TABLE membros (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL,
+      atualizado_em TEXT NOT NULL DEFAULT (datetime('now')), atualizado_por TEXT NOT NULL DEFAULT '');
+    INSERT INTO membros (nome) VALUES ('Antigo');`);
+  velho.close();
+  const b = abreBanco(arq);
+  b.criaUsuario('zeca', 'senha-do-zeca', { perfil: 'gestor' });
+  assert.equal(b.autentica('zeca', 'senha-do-zeca').perfil, 'gestor');
+  assert.equal(b.dados().membros[0].usuarioId, null, 'QA antigo fica sem dono (so o admin edita ate vincular)');
+  b.fecha();
 });
 
 // ------------------------------------------------------------------ site

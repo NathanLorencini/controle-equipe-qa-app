@@ -59,18 +59,35 @@ cria a própria no primeiro acesso.
 
 ```bash
 # Docker
-docker exec -it controle-equipe-qa node server/usuarios.mjs criar <usuario>
+docker exec -it controle-equipe-qa node server/usuarios.mjs criar <usuario> --perfil <admin|gestor|qa>
 docker exec -it controle-equipe-qa node server/usuarios.mjs listar
-docker exec -it controle-equipe-qa node server/usuarios.mjs senha <usuario>     # esqueceu a senha
+docker exec -it controle-equipe-qa node server/usuarios.mjs senha <usuario>            # esqueceu a senha
+docker exec -it controle-equipe-qa node server/usuarios.mjs perfil <usuario> <perfil>  # muda o perfil
 docker exec -it controle-equipe-qa node server/usuarios.mjs remover <usuario>
 
 # Node direto
-DB_PATH=/var/lib/controle-equipe-qa/controle.db npm run usuarios -- criar <usuario>
+DB_PATH=/var/lib/controle-equipe-qa/controle.db npm run usuarios -- criar <usuario> --perfil qa
 ```
 
-Usuários iniciais da equipe: **lais**, **romario**, **nathan**, **johnny**. As
-senhas provisórias são passadas pelo responsável do projeto por canal privado,
-**não** por este repositório.
+**Perfis:** `admin` faz tudo; `gestor` cria e remove QAs e altera só o próprio
+QA; `qa` altera só o próprio QA. Sem `--perfil`, o usuário é criado como `qa`.
+Mudança de perfil vale na hora, sem novo login. Tabela completa no `README.md`
+(*Quem pode o que*).
+
+Usuários iniciais da equipe:
+
+| Usuário | Perfil |
+|---------|--------|
+| johnny | `admin` |
+| nathan | `gestor` |
+| lais | `qa` |
+| romario | `qa` |
+
+As senhas provisórias são definidas por quem cria os usuários e entregues a cada
+pessoa por canal privado — **nunca** neste repositório nem no chamado.
+
+Depois de criar, o **admin** (ou o gestor) cria os QAs na tela, escolhendo o
+usuário dono de cada um.
 
 - Usuário: 2 a 40 caracteres (letras, números, `.`, `-`, `_`), sem diferença de
   maiúscula. Senha: mínimo 8 caracteres.
@@ -113,10 +130,16 @@ Sugestão: backup diário do arquivo com retenção de 30 dias.
 | POST | `/api/logout` | — | encerra a sessão |
 | GET | `/api/eu` | sim | usuário logado e se a senha é provisória |
 | POST | `/api/senha` | sim | `{atual, nova}` troca a própria senha |
-| GET | `/api/dados`, `/api/versao`, `/api/backup` | sim | leitura |
-| POST/PATCH/DELETE | `/api/membros…`, `/api/projetos…`, `/api/importar` | sim | gravação (registra quem alterou) |
+| GET | `/api/dados`, `/api/versao` | sim | leitura (todos) |
+| GET | `/api/usuarios` | admin, gestor | usuários para escolher o dono de um QA |
+| POST / DELETE | `/api/membros`, `/api/membros/:id` | admin, gestor | cria (`{nome, usuarioId}`) / remove QA |
+| PATCH | `/api/membros/:id` | `nome`: dono ou admin; `usuarioId`: admin | renomeia / troca o dono |
+| POST/PATCH/DELETE | `/api/membros/:id/projetos`, `/api/projetos/:id` | dono do QA ou admin | projetos (registra quem alterou) |
+| POST | `/api/importar` | admin | dados antigos do navegador |
+| GET | `/api/backup` | admin | tudo em JSON |
 
 Com senha provisória, só `/api/eu`, `/api/senha` e `/api/logout` respondem.
+Sem permissão: `403` com o motivo.
 
 ## Segurança
 
