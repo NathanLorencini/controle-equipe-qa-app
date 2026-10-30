@@ -1,13 +1,18 @@
 import { storage } from './storage';
 import { SITUACOES, type Membro, type Projeto, type Situacao } from '../types';
 
-/** Chave usada desde a primeira versão: não mudar, ou os dados salvos somem da tela. */
+/**
+ * Chave das versões sem banco, quando cada navegador guardava os próprios dados.
+ * Hoje só é lida para oferecer a importação para a base compartilhada.
+ */
 const CHAVE = 'qa-equipe-dados';
+/** Marca de que os dados deste navegador já foram enviados (ou o aviso dispensado). */
+const CHAVE_IMPORTADO = 'qa-equipe-dados-importado';
 
 let ultimoId = 0;
 
-/** Id único mesmo com dois cliques no mesmo milissegundo. */
-export function novoId(): number {
+/** Id provisório para o que vem do navegador; o banco dá o definitivo. */
+function novoId(): number {
   ultimoId = Math.max(Date.now(), ultimoId + 1);
   return ultimoId;
 }
@@ -35,10 +40,12 @@ function normalizarProjeto(p: Partial<Projeto> & Record<string, unknown>): Proje
 }
 
 /**
- * Lê os dados salvos. Aceita o formato antigo (percentual gravado como texto)
- * e ignora o que não for reconhecível, em vez de quebrar a tela.
+ * Lê o que as versões sem banco deixaram neste navegador. Aceita o formato
+ * antigo (percentual gravado como texto) e ignora o que não for reconhecível.
+ * Lista vazia quando não há nada ou já foi importado.
  */
-export async function carregar(): Promise<Membro[]> {
+export async function carregarDoNavegador(): Promise<Membro[]> {
+  if (await storage.get(CHAVE_IMPORTADO)) return [];
   const bruto = await storage.get(CHAVE);
   if (!bruto) return [];
   try {
@@ -56,6 +63,7 @@ export async function carregar(): Promise<Membro[]> {
   }
 }
 
-export function salvar(membros: Membro[]): Promise<void> {
-  return storage.set(CHAVE, JSON.stringify(membros));
+/** Não oferece mais a importação. Os dados antigos ficam no navegador, como cópia. */
+export function marcarImportado(): Promise<void> {
+  return storage.set(CHAVE_IMPORTADO, new Date().toISOString());
 }

@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { Download, Plus, User } from 'lucide-react';
-import type { Membro, Projeto } from '../types';
-import { carregar, novoId, salvar } from '../lib/dados';
+import { useEffect, useState } from 'react';
+import { Download, KeyRound, LogOut, Plus, Upload, User } from 'lucide-react';
+import type { Membro } from '../types';
+import { carregarDoNavegador, marcarImportado } from '../lib/dados';
+import { useBaseCompartilhada, type Situacao } from '../lib/useBaseCompartilhada';
 import {
   exportarEquipeDocx, exportarEquipeXlsx, exportarMembroDocx, exportarMembroXlsx,
 } from '../lib/exportar';
@@ -16,70 +17,108 @@ async function tentar(acao: () => unknown, mensagem: string) {
   }
 }
 
-export default function ControleEquipeQA() {
-  const [membros, setMembros] = useState<Membro[]>([]);
+const avisar = (mensagem: string) => alert(mensagem);
+
+const SITUACAO: Record<Situacao, { texto: string; cor: string }> = {
+  carregando: { texto: 'Carregando…', cor: 'bg-gray-400' },
+  sincronizado: { texto: 'Salvo — todos veem as mesmas informações', cor: 'bg-green-500' },
+  salvando: { texto: 'Salvando…', cor: 'bg-amber-500' },
+  'sem-conexao': { texto: 'Sem conexão com o servidor — tentando de novo', cor: 'bg-red-500' },
+};
+
+interface Props {
+  usuario: string;
+  onSair: () => void;
+  onTrocarSenha: () => void;
+}
+
+export default function ControleEquipeQA({ usuario, onSair, onTrocarSenha }: Props) {
+  const {
+    membros, situacao, adicionarMembro: criarMembro, removerMembro: apagarMembro,
+    adicionarProjeto, alterarProjeto, removerProjeto, importar,
+  } = useBaseCompartilhada(avisar);
   const [nomeQA, setNomeQA] = useState('');
   const [busca, setBusca] = useState('');
   const [abertos, setAbertos] = useState<Record<number, boolean>>({});
-  const carregou = useRef(false);
+  // O que versões antigas (sem banco) deixaram só neste navegador.
+  const [doNavegador, setDoNavegador] = useState<Membro[]>([]);
 
   useEffect(() => {
-    carregar().then((lista) => {
-      setMembros(lista);
-      carregou.current = true;
-    });
+    carregarDoNavegador().then(setDoNavegador);
   }, []);
 
-  // Grava a cada mudança, mas só depois de ler o que já estava salvo
-  // (senão a lista vazia do primeiro render apagaria os dados).
-  useEffect(() => {
-    if (carregou.current) salvar(membros);
-  }, [membros]);
-
-  const alterarMembro = (id: number, f: (m: Membro) => Membro) =>
-    setMembros((lista) => lista.map((m) => (m.id === id ? f(m) : m)));
-
-  const adicionarMembro = () => {
+  const adicionarMembro = async () => {
     const nome = nomeQA.trim();
     if (!nome) { alert('Por favor, insira o nome do QA'); return; }
-    const novo: Membro = { id: novoId(), nome, projetos: [] };
-    setMembros((lista) => [...lista, novo]);
-    setAbertos((a) => ({ ...a, [novo.id]: true }));
-    setNomeQA('');
+    const novo = await criarMembro(nome);
+    if (novo) {
+      setAbertos((a) => ({ ...a, [novo.id]: true }));
+      setNomeQA('');
+    }
   };
 
   const removerMembro = (id: number) => {
-    if (!confirm('Deseja realmente remover este QA e todos seus projetos?')) return;
-    setMembros((lista) => lista.filter((m) => m.id !== id));
+    if (!confirm('Deseja realmente remover este QA e todos seus projetos? Isso vale para todos que usam o app.')) return;
+    void apagarMembro(id);
   };
 
-  const adicionarProjeto = (membroId: number) => {
-    const projeto: Projeto = { id: novoId(), nome: '', situacao: 'Em Andamento', percentualFoco: 0, pros: '', contras: '' };
-    alterarMembro(membroId, (m) => ({ ...m, projetos: [...m.projetos, projeto] }));
+  const importarDoNavegador = async () => {
+    const r = await importar(doNavegador);
+    if (!r) return;
+    await marcarImportado();
+    setDoNavegador([]);
+    alert(`Enviado para a base compartilhada: ${r.qas} QA(s) e ${r.projetos} projeto(s).`);
   };
 
-  const alterarProjeto = (membroId: number, projetoId: number, campos: Partial<Projeto>) =>
-    alterarMembro(membroId, (m) => ({
-      ...m,
-      projetos: m.projetos.map((p) => (p.id === projetoId ? { ...p, ...campos } : p)),
-    }));
-
-  const removerProjeto = (membroId: number, projetoId: number) =>
-    alterarMembro(membroId, (m) => ({ ...m, projetos: m.projetos.filter((p) => p.id !== projetoId) }));
+  const dispensarImportacao = async () => {
+    if (!confirm('Não enviar os dados deste navegador? Eles continuam guardados aqui, mas o aviso não aparece mais.')) return;
+    await marcarImportado();
+    setDoNavegador([]);
+  };
 
   const filtrados = membros.filter((m) => m.nome.toLowerCase().includes(busca.toLowerCase()));
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
+        <div className="flex flex-wrap items-center justify-end gap-3 mb-3 text-sm text-white/90">
+          <span className="flex items-center gap-1"><User className="w-4 h-4" />{usuario}</span>
+          <button onClick={onTrocarSenha} className="flex items-center gap-1 px-2 py-1 rounded-md hover:bg-white/10">
+            <KeyRound className="w-4 h-4" />Trocar senha
+          </button>
+          <button onClick={onSair} className="flex items-center gap-1 px-2 py-1 rounded-md hover:bg-white/10">
+            <LogOut className="w-4 h-4" />Sair
+          </button>
+        </div>
         <div className="bg-white rounded-2xl shadow-2xl p-6 md:p-8 mb-8">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-8">
             <div className="flex items-center gap-3">
               <User className="w-8 h-8 text-purple-600" />
               <h1 className="text-3xl font-bold text-gray-800">Controle de Equipe QA</h1>
             </div>
-            <div className="text-sm text-gray-500">{membros.length} QA(s) cadastrado(s)</div>
+            <div className="flex flex-col items-end gap-1 text-sm text-gray-500">
+              <span>{membros.length} QA(s) cadastrado(s)</span>
+              <span className="flex items-center gap-2" role="status" aria-live="polite">
+                <span className={`inline-block w-2 h-2 rounded-full ${SITUACAO[situacao].cor}`} />
+                {SITUACAO[situacao].texto}
+              </span>
+            </div>
           </div>
+
+          {doNavegador.length > 0 && (
+            <div className="mb-6 p-4 rounded-lg border-2 border-amber-300 bg-amber-50 text-amber-900 flex flex-wrap items-center gap-3">
+              <p className="flex-1 min-w-[16rem] text-sm">
+                Este navegador tem <strong>{doNavegador.length} QA(s)</strong> salvos da versão antiga, que guardava os
+                dados só aqui. Envie para a base compartilhada para que todos vejam.
+              </p>
+              <button onClick={importarDoNavegador} className="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 text-sm flex items-center gap-2">
+                <Upload className="w-4 h-4" />Enviar para a base compartilhada
+              </button>
+              <button onClick={dispensarImportacao} className="px-3 py-2 text-amber-800 hover:underline text-sm">
+                Não enviar
+              </button>
+            </div>
+          )}
 
           <div className="flex gap-3 mb-4">
             <input
@@ -140,9 +179,9 @@ export default function ControleEquipeQA() {
               aberto={!!abertos[membro.id]}
               onAlternar={() => setAbertos((a) => ({ ...a, [membro.id]: !a[membro.id] }))}
               onRemover={() => removerMembro(membro.id)}
-              onAdicionarProjeto={() => adicionarProjeto(membro.id)}
+              onAdicionarProjeto={() => void adicionarProjeto(membro.id)}
               onAlterarProjeto={(projetoId, campos) => alterarProjeto(membro.id, projetoId, campos)}
-              onRemoverProjeto={(projetoId) => removerProjeto(membro.id, projetoId)}
+              onRemoverProjeto={(projetoId) => void removerProjeto(membro.id, projetoId)}
               onExportarXlsx={() => tentar(() => exportarMembroXlsx(membro), 'Erro ao exportar QA para .xlsx.')}
               onExportarDocx={() => tentar(() => exportarMembroDocx(membro), 'Erro ao exportar QA para .docx.')}
             />

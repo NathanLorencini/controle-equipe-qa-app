@@ -4,6 +4,9 @@ node_modules/
 # Build
 dist/
 
+# Banco local (desenvolvimento e npm start): nunca vai para o git
+dados/
+
 # Sistema e editor
 .DS_Store
 Thumbs.db

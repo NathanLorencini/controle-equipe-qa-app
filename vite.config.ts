@@ -6,6 +6,8 @@ export default defineConfig({
   // Caminhos relativos: o build funciona na raiz do dominio (https://app/) ou
   // num subcaminho (https://intranet/controle-qa/) sem rebuild.
   base: './',
+  // Em desenvolvimento a API roda a parte (npm run dev sobe os dois).
+  server: { proxy: { '/api': 'http://localhost:3001' } },
   build: {
     outDir: 'dist',
     sourcemap: false,

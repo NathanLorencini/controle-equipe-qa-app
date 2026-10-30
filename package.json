@@ -1,17 +1,20 @@
 {
   "name": "controle-equipe-qa-app",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
+    "start": "node server/index.mjs",
+    "usuarios": "node server/usuarios.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx --max-warnings=0",
+    "test": "node --test server/servidor.test.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "check": "npm run typecheck && npm run lint && npm run build"
+    "check": "npm run typecheck && npm run lint && npm test && npm run build"
   },
   "engines": {
-    "node": ">=18.18"
+    "node": ">=22.13"
   },
   "dependencies": {
     "docx": "^8.5.0",
@@ -35,6 +38,6 @@
     "typescript": "^5.1.6",
     "vite": "^5.0.0"
   },
-  "description": "Controle da equipe de QA: projetos, situacao e percentual de foco, com exportacao para Excel e Word.",
+  "description": "Controle da equipe de QA: projetos, situacao e percentual de foco, com login, base compartilhada e exportacao para Excel e Word.",
   "type": "module"
 }

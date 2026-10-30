@@ -30,9 +30,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t controle-equipe-qa:ci .
-      - name: Sobe o container e confere o healthcheck e a pagina
+      - name: Sobe o container, cria usuario, entra e grava
         run: |
-          docker run -d --name app -p 8080:8080 controle-equipe-qa:ci
+          docker volume create qa-dados
+          docker run -d --name app -p 8080:8080 -v qa-dados:/data controle-equipe-qa:ci
           for i in $(seq 1 20); do curl -fs http://localhost:8080/healthz && break; sleep 1; done
           curl -fs http://localhost:8080/ | grep -q '<div id="root">'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/dados)" = 401
+          printf 'senha-do-ci-1\n' | docker exec -i app node server/usuarios.mjs criar ci --definitiva
+          curl -fs -c jar -H 'Content-Type: application/json' -d '{"usuario":"ci","senha":"senha-do-ci-1"}' http://localhost:8080/api/login
+          curl -fs -b jar -H 'Content-Type: application/json' -d '{"nome":"QA do CI"}' http://localhost:8080/api/membros
           docker rm -f app
+      - name: Usuarios e dados sobrevivem a troca do container (volume)
+        run: |
+          docker run -d --name app2 -p 8080:8080 -v qa-dados:/data controle-equipe-qa:ci
+          for i in $(seq 1 20); do curl -fs http://localhost:8080/healthz && break; sleep 1; done
+          curl -fs -c jar -H 'Content-Type: application/json' -d '{"usuario":"ci","senha":"senha-do-ci-1"}' http://localhost:8080/api/login
+          curl -fs -b jar http://localhost:8080/api/dados | grep -q 'QA do CI'
+          docker rm -f app2

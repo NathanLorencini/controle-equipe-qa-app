@@ -2,8 +2,9 @@
  * Armazenamento chave/valor.
  *
  * Usa `window.storage` quando o ambiente oferece (Electron, Capacitor, extensão)
- * e cai para o `localStorage` do navegador. No navegador, os dados ficam só
- * naquele navegador daquela máquina.
+ * e cai para o `localStorage` do navegador. Os dados da equipe ficam no
+ * servidor (lib/api.ts); aqui só se lê o que as versões sem banco deixaram,
+ * para oferecer a importação.
  */
 export const storage = {
   async get(key: string): Promise<string | null> {
